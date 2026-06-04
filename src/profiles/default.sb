@@ -1,24 +1,37 @@
-;; pagu-box --no-net variant: same FS deny-list, network denied.
+;; pagu-box `default` profile — allow-by-default with a secret deny-list.
 ;;
-;; For when you want to run an agent purely offline — read code, refactor,
-;; review — without any outbound traffic. The agent's API calls will fail,
-;; but its non-network tools (file reads, builds, tests against localhost)
-;; still work.
+;; Day-to-day coding-agent use. The agent has read+write access to most of
+;; the FS — including your shell config, editor config, project files — but
+;; cannot reach credential-bearing paths.
+;;
+;; Parameters expected (passed via `sandbox-exec -D NAME=value`):
+;;   HOME — absolute path to the user's home directory.
 
 (version 1)
 (allow default)
 
 (deny file-read* file-write*
+  ;; SSH / signing
   (subpath (string-append (param "HOME") "/.ssh"))
   (subpath (string-append (param "HOME") "/.gnupg"))
+
+  ;; Cloud credentials
   (subpath (string-append (param "HOME") "/.aws"))
   (subpath (string-append (param "HOME") "/.azure"))
   (subpath (string-append (param "HOME") "/.config/gcloud"))
+
+  ;; Secret-decryption keys
   (subpath (string-append (param "HOME") "/.config/sops"))
   (subpath (string-append (param "HOME") "/.config/age"))
+
+  ;; CLI tool tokens
   (subpath (string-append (param "HOME") "/.config/gh"))
   (subpath (string-append (param "HOME") "/.config/op"))
+
+  ;; Password stores
   (subpath (string-append (param "HOME") "/.password-store"))
+
+  ;; macOS-specific secret stores
   (subpath (string-append (param "HOME") "/Library/Keychains"))
   (subpath (string-append (param "HOME") "/Library/Cookies"))
   (subpath (string-append (param "HOME") "/Library/Mail"))
@@ -37,8 +50,4 @@
   (literal (string-append (param "HOME") "/.python_history"))
 )
 
-;; Network denied. Localhost loopback still works (needed for local dev servers
-;; the agent might smoke-test).
-(deny network*)
-(allow network* (local ip))
-(allow network* (remote ip "localhost:*"))
+(allow network*)

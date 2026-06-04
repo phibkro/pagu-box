@@ -1,11 +1,20 @@
 # pagu-box
 
-A cross-platform sandboxed launcher for coding agents (Claude Code, opencode,
-aider, codex CLI, …). Wraps the agent in a hardened process boundary that hides
-secrets and limits filesystem reach without breaking ergonomics.
+A cross-platform command prefix that runs **any process** inside a hardened
+sandbox. The original use case is coding agents (Claude Code, opencode,
+aider, codex CLI, …) but pagu-box is process-agnostic — anything you can
+launch from a shell can be wrapped:
+
+```sh
+pagu-box claude --dangerously-skip-permissions
+pagu-box --profile=strict aider
+pagu-box --profile=paranoid -- ./some-random-binary
+pagu-box --no-net pytest                  # offline test run
+pagu-box git status                       # yes, this also works
+```
 
 Sibling of [pagu] — the hermit-crab agent that the model cannot exec from.
-pagu-box is **the shell without the crab**: bring your own agent.
+pagu-box is **the shell without the crab**: bring your own process.
 
 | | pagu | pagu-box |
 |-|------|----------|
@@ -29,7 +38,20 @@ directory or `/dev/null` where the secret should be.
   _do_ inside that reach.
 - Kernel exploits in the sandbox primitives themselves (bwrap, sandbox-exec).
 
-## What's hidden by default
+## Profiles
+
+`--profile=NAME` selects a named policy preset. CLI flags layer on top.
+
+| Profile | $HOME policy | Default deny-list | Network | Use case |
+|---|---|---|---|---|
+| `default` | bound RW | full secret deny-list (below) | allowed | day-to-day coding agent |
+| `strict` | tmpfs; only `$PWD` + `~/.claude` RW | implicit (nothing else reachable) | allowed | untrusted agent or experimental tool |
+| `paranoid` | tmpfs; only `$PWD` RW | implicit | denied | running unknown CLI from a Reddit thread |
+| `loose` | bound RW | `~/.ssh`, `~/.gnupg`, macOS Keychain only | allowed | trusted agent; minimal protection |
+
+If `--profile` is omitted, `default` is used.
+
+## What's hidden by `default` profile
 
 | Path | Why |
 |------|-----|
@@ -72,16 +94,18 @@ under the sandbox.
 ## Use
 
 ```sh
-pagu-box claude               # default policy
-pagu-box --no-net claude      # additionally drop network
-pagu-box --allow /mnt/data claude         # extra RW bind
-pagu-box --deny ~/.npmrc claude           # extra secret to hide
-pagu-box --env FOO=bar claude             # pass an env var through the scrub
+pagu-box claude                              # default profile
+pagu-box --profile=strict claude             # tighter sandbox
+pagu-box --no-net pytest                     # any command, offline
+pagu-box --allow /mnt/data claude            # extra RW bind (linux only in v1)
+pagu-box --deny ~/.npmrc claude              # extra secret to hide
+pagu-box --env FOO=bar claude                # pass an env var through the scrub
+pagu-box -- --profile=strict claude          # `--` if your command also has --profile
 ```
 
-The default env scrub forwards `ANTHROPIC_API_KEY`, `HOME`, `USER`, `PATH`,
-`TERM`, `LANG`, plus the cert-bundle locations. Everything else is dropped.
-Pass agent-specific env vars with `--env`.
+The default env scrub forwards `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
+`GEMINI_API_KEY`, plus `HOME`, `USER`, `PATH`, `TERM`, `LANG`, `SSL_CERT_FILE`.
+Everything else is dropped. Pass extra env vars with `--env`.
 
 ## Mechanism
 

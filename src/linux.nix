@@ -2,14 +2,12 @@
 
 # Linux mechanism: bubblewrap user-namespace sandbox.
 #
-# Default policy:
-# - $HOME bound read-write
-# - secret subpaths overlaid with tmpfs (dir) or /dev/null (file)
-# - /nix/store ro, daemon socket bound, /etc/* selectively ro
-# - network shared with host (the API call needs it; --no-net drops it)
-# - env scrubbed; only an explicit allow-list passes through
+# Profile-driven policy — see `--profile=NAME`. Each built-in profile sets
+# the variables consumed below: BIND_HOME, HIDE_DIRS, HIDE_FILES, SHARE_NET,
+# PASS_ENV. CLI flags layer on top of the profile (--allow extends bind set,
+# --deny extends hide set, --env extends passthrough, --no-net forces drop).
 #
-# The bwrap FLAGS are the security boundary, not this script.
+# The bwrap FLAGS assembled here are the security boundary, not this script.
 
 pkgs.writeShellApplication {
   name = "pagu-box";
@@ -17,57 +15,95 @@ pkgs.writeShellApplication {
   text = ''
     set -euo pipefail
 
-    # ---- default policy ----
-    # Subpaths (directories) hidden via tmpfs overlay
-    HIDE_DIRS=(
-      "$HOME/.ssh"
-      "$HOME/.gnupg"
-      "$HOME/.aws"
-      "$HOME/.azure"
-      "$HOME/.config/sops"
-      "$HOME/.config/age"
-      "$HOME/.config/gh"
-      "$HOME/.config/op"
-      "$HOME/.config/gcloud"
-      "$HOME/.password-store"
-    )
-    # Single files hidden via /dev/null bind
-    HIDE_FILES=(
-      "$HOME/.netrc"
-      "$HOME/.bash_history"
-      "$HOME/.zsh_history"
-      "$HOME/.python_history"
-    )
-    # Env vars allowed through --clearenv
-    PASS_ENV=( ANTHROPIC_API_KEY OPENAI_API_KEY )
-
-    # ---- arg parse ----
+    PROFILE="default"
     EXTRA_ALLOW=()
     EXTRA_DENY=()
-    SHARE_NET=1
+    PASS_ENV_USER=()
+    NO_NET=0
+
     while [ $# -gt 0 ]; do
       case "$1" in
+        --profile=*)    PROFILE="''${1#--profile=}"; shift ;;
+        --profile)      PROFILE="$2"; shift 2 ;;
         --allow)        EXTRA_ALLOW+=("$2"); shift 2 ;;
         --deny)         EXTRA_DENY+=("$2"); shift 2 ;;
-        --env)          PASS_ENV+=("''${2%%=*}"); shift 2 ;;
-        --no-net)       SHARE_NET=0; shift ;;
+        --env)          PASS_ENV_USER+=("''${2%%=*}"); shift 2 ;;
+        --no-net)       NO_NET=1; shift ;;
         --)             shift; break ;;
         -h|--help)
           cat <<'USAGE'
     pagu-box [OPTIONS] -- COMMAND [ARGS...]
     pagu-box [OPTIONS] COMMAND [ARGS...]
 
+      --profile=NAME  default | strict | paranoid | loose  (default: default)
       --allow PATH    extra read-write bind mount (repeatable)
       --deny PATH     extra deny — tmpfs over dir or /dev/null over file (repeatable)
       --env VAR       forward env var through the scrub (repeatable)
       --no-net        drop network access
       -h, --help      this text
+
+    Profiles (this OS — Linux/bwrap):
+      default     $HOME bound RW; secrets denied;        net allowed
+      strict      $HOME tmpfs; only $PWD + ~/.claude RW; net allowed
+      paranoid    $HOME tmpfs; only $PWD RW;             net DENIED
+      loose       $HOME bound RW; only ~/.ssh, ~/.gnupg denied; net allowed
     USAGE
           exit 0 ;;
         *)              break ;;
       esac
     done
     [ $# -eq 0 ] && { echo "pagu-box: no command given" >&2; exit 64; }
+
+    # ---- profile selection ----
+    case "$PROFILE" in
+      default)
+        BIND_HOME=1
+        HIDE_DIRS=(
+          "$HOME/.ssh"            "$HOME/.gnupg"
+          "$HOME/.aws"            "$HOME/.azure"
+          "$HOME/.config/sops"    "$HOME/.config/age"
+          "$HOME/.config/gh"      "$HOME/.config/op"
+          "$HOME/.config/gcloud"
+          "$HOME/.password-store"
+        )
+        HIDE_FILES=(
+          "$HOME/.netrc"          "$HOME/.bash_history"
+          "$HOME/.zsh_history"    "$HOME/.python_history"
+        )
+        SHARE_NET=1
+        ;;
+      strict)
+        BIND_HOME=0
+        EXTRA_ALLOW+=("$HOME/.claude")
+        HIDE_DIRS=()
+        HIDE_FILES=()
+        SHARE_NET=1
+        ;;
+      paranoid)
+        BIND_HOME=0
+        HIDE_DIRS=()
+        HIDE_FILES=()
+        SHARE_NET=0
+        ;;
+      loose)
+        BIND_HOME=1
+        HIDE_DIRS=( "$HOME/.ssh" "$HOME/.gnupg" )
+        HIDE_FILES=()
+        SHARE_NET=1
+        ;;
+      *)
+        echo "pagu-box: unknown profile '$PROFILE' (try default|strict|paranoid|loose)" >&2
+        exit 64
+        ;;
+    esac
+
+    # CLI override
+    [ "$NO_NET" -eq 1 ] && SHARE_NET=0
+
+    # ---- env passthrough policy ----
+    # Common agent API keys are forwarded by default if present in the host env.
+    PASS_ENV=( ANTHROPIC_API_KEY OPENAI_API_KEY GEMINI_API_KEY )
+    PASS_ENV+=( "''${PASS_ENV_USER[@]}" )
 
     # ---- assemble bwrap args ----
     args=(
@@ -88,11 +124,20 @@ pkgs.writeShellApplication {
       --proc /proc
       --dev /dev
       --tmpfs /tmp
-      --bind "$HOME" "$HOME"
       --clearenv
     )
 
-    # Hide secret dirs (skip nonexistent — bwrap fails on missing source even for tmpfs target)
+    # HOME — bind or tmpfs per profile.
+    if [ "$BIND_HOME" -eq 1 ]; then
+      args+=( --bind "$HOME" "$HOME" )
+    else
+      args+=( --tmpfs "$HOME" )
+    fi
+
+    # Working directory always available (mounted AFTER tmpfs HOME so it wins).
+    args+=( --bind "$PWD" "$PWD" --chdir "$PWD" )
+
+    # Hide secrets (profile + --deny).
     for d in "''${HIDE_DIRS[@]}" "''${EXTRA_DENY[@]}"; do
       if [ -d "$d" ]; then
         args+=( --tmpfs "$d" )
@@ -104,12 +149,12 @@ pkgs.writeShellApplication {
       [ -e "$f" ] && args+=( --bind /dev/null "$f" )
     done
 
-    # Extra allowed paths
+    # Extra allowed paths.
     for p in "''${EXTRA_ALLOW[@]}"; do
-      args+=( --bind "$p" "$p" )
+      [ -e "$p" ] && args+=( --bind "$p" "$p" )
     done
 
-    # Env passthrough
+    # Env passthrough.
     for v in "''${PASS_ENV[@]}"; do
       [ -n "''${!v:-}" ] && args+=( --setenv "$v" "''${!v}" )
     done
@@ -123,11 +168,8 @@ pkgs.writeShellApplication {
       --setenv SSL_CERT_FILE "''${SSL_CERT_FILE:-''${NIX_SSL_CERT_FILE:-/etc/ssl/certs/ca-certificates.crt}}"
     )
 
-    # Isolation
-    args+=(
-      --unshare-all
-      --die-with-parent
-    )
+    # Isolation.
+    args+=( --unshare-all --die-with-parent )
     [ "$SHARE_NET" -eq 1 ] && args+=( --share-net )
 
     exec ${pkgs.bubblewrap}/bin/bwrap "''${args[@]}" -- "$@"
