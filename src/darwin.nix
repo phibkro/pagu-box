@@ -17,6 +17,8 @@ pkgs.writeShellApplication {
     set -euo pipefail
 
     PROFILE="default"
+    EXTRA_ALLOW=()
+    EXTRA_RO_ALLOW=()
     EXTRA_DENY=()
     PASS_ENV_USER=()
     NO_NET=0
@@ -25,7 +27,8 @@ pkgs.writeShellApplication {
       case "$1" in
         --profile=*)    PROFILE="''${1#--profile=}"; shift ;;
         --profile)      PROFILE="$2"; shift 2 ;;
-        --allow)        shift 2 ;;  # no-op on darwin v1 (profile is allow-by-default)
+        --allow)        EXTRA_ALLOW+=("$2"); shift 2 ;;
+        --ro-allow)     EXTRA_RO_ALLOW+=("$2"); shift 2 ;;
         --deny)         EXTRA_DENY+=("$2"); shift 2 ;;
         --env)          PASS_ENV_USER+=("''${2%%=*}"); shift 2 ;;
         --no-net)       NO_NET=1; shift ;;
@@ -36,7 +39,10 @@ pkgs.writeShellApplication {
     pagu-box [OPTIONS] COMMAND [ARGS...]
 
       --profile=NAME  default | strict | paranoid | loose  (default: default)
-      --allow PATH    (no-op on darwin v1 — seatbelt profile is allow-by-default)
+      --allow PATH    extra RW allow — appends (allow file-read*/write*) (deny-by-default
+                      profiles only — no-op for default/loose since they allow by default)
+      --ro-allow PATH extra RO allow — appends (allow file-read*) only (deny-by-default
+                      profiles only — no-op for default/loose)
       --deny PATH     extra deny — appends a (deny) clause to the seatbelt profile
       --env VAR       forward env var through the scrub (repeatable)
       --no-net        drop network access (composes onto the chosen profile)
@@ -65,13 +71,36 @@ pkgs.writeShellApplication {
     BASE="${profilesDir}/$PROFILE.sb"
     [ -f "$BASE" ] || { echo "pagu-box: profile file missing: $BASE" >&2; exit 70; }
 
-    # Compose extra clauses (--deny, --no-net) into a runtime profile.
+    # Compose extra clauses (--allow, --ro-allow, --deny, --no-net) onto the
+    # profile at runtime.
     PROFILE_FILE="$BASE"
-    if [ ''${#EXTRA_DENY[@]} -gt 0 ] || [ "$NO_NET" -eq 1 ]; then
+    NEED_MERGE=0
+    [ ''${#EXTRA_ALLOW[@]} -gt 0 ]    && NEED_MERGE=1
+    [ ''${#EXTRA_RO_ALLOW[@]} -gt 0 ] && NEED_MERGE=1
+    [ ''${#EXTRA_DENY[@]} -gt 0 ]    && NEED_MERGE=1
+    [ "$NO_NET" -eq 1 ]              && NEED_MERGE=1
+
+    if [ "$NEED_MERGE" -eq 1 ]; then
       MERGED="$(mktemp -t pagu-box.XXXXXX.sb)"
       trap 'rm -f "$MERGED"' EXIT
       cat "$BASE" > "$MERGED"
 
+      # --allow / --ro-allow are no-ops under default/loose (allow-by-default)
+      # but meaningful under strict/paranoid (deny-by-default).
+      for p in "''${EXTRA_ALLOW[@]}"; do
+        if [ -d "$p" ]; then
+          printf '(allow file-read* file-write* (subpath "%s"))\n' "$p" >> "$MERGED"
+        else
+          printf '(allow file-read* file-write* (literal "%s"))\n' "$p" >> "$MERGED"
+        fi
+      done
+      for p in "''${EXTRA_RO_ALLOW[@]}"; do
+        if [ -d "$p" ]; then
+          printf '(allow file-read* (subpath "%s"))\n' "$p" >> "$MERGED"
+        else
+          printf '(allow file-read* (literal "%s"))\n' "$p" >> "$MERGED"
+        fi
+      done
       for p in "''${EXTRA_DENY[@]}"; do
         if [ -d "$p" ]; then
           printf '(deny file-read* file-write* (subpath "%s"))\n' "$p" >> "$MERGED"

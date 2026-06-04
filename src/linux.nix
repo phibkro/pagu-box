@@ -17,6 +17,7 @@ pkgs.writeShellApplication {
 
     PROFILE="default"
     EXTRA_ALLOW=()
+    EXTRA_RO_ALLOW=()
     EXTRA_DENY=()
     PASS_ENV_USER=()
     NO_NET=0
@@ -26,6 +27,7 @@ pkgs.writeShellApplication {
         --profile=*)    PROFILE="''${1#--profile=}"; shift ;;
         --profile)      PROFILE="$2"; shift 2 ;;
         --allow)        EXTRA_ALLOW+=("$2"); shift 2 ;;
+        --ro-allow)     EXTRA_RO_ALLOW+=("$2"); shift 2 ;;
         --deny)         EXTRA_DENY+=("$2"); shift 2 ;;
         --env)          PASS_ENV_USER+=("''${2%%=*}"); shift 2 ;;
         --no-net)       NO_NET=1; shift ;;
@@ -37,6 +39,7 @@ pkgs.writeShellApplication {
 
       --profile=NAME  default | strict | paranoid | loose  (default: default)
       --allow PATH    extra read-write bind mount (repeatable)
+      --ro-allow PATH extra read-only bind mount (repeatable)
       --deny PATH     extra deny — tmpfs over dir or /dev/null over file (repeatable)
       --env VAR       forward env var through the scrub (repeatable)
       --no-net        drop network access
@@ -155,6 +158,9 @@ pkgs.writeShellApplication {
     # Extra allowed paths.
     for p in "''${EXTRA_ALLOW[@]}"; do
       [ -e "$p" ] && args+=( --bind "$p" "$p" )
+    done
+    for p in "''${EXTRA_RO_ALLOW[@]}"; do
+      [ -e "$p" ] && args+=( --ro-bind "$p" "$p" )
     done
 
     # Env passthrough.
