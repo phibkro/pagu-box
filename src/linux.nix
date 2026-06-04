@@ -74,7 +74,10 @@ pkgs.writeShellApplication {
         ;;
       strict)
         BIND_HOME=0
-        EXTRA_ALLOW+=("$HOME/.claude")
+        # ~/.claude (state dir) + ~/.claude.json (config file) — both required
+        # by Claude Code. opencode and similar use ~/.config/<tool>/ which is
+        # not bound by strict; the user must add --allow for those.
+        EXTRA_ALLOW+=("$HOME/.claude" "$HOME/.claude.json")
         HIDE_DIRS=()
         HIDE_FILES=()
         SHARE_NET=1
