@@ -23,6 +23,8 @@ pkgs.writeShellApplication {
     NO_NET=0
     AGENT_PRESETS=()      # --claude, --opencode, --codex, --aider etc.
     AUTO_AGENT=1          # set 0 with --no-auto-agent to suppress command-name inference
+    PWD_RO=0              # downgrade $PWD bind from RW to RO; per-deployment wrappers
+                          # use this to keep a tree read-only without rewriting the bind set
 
     while [ $# -gt 0 ]; do
       case "$1" in
@@ -41,8 +43,10 @@ pkgs.writeShellApplication {
         --codex)        AGENT_PRESETS+=(codex); shift ;;
         --aider)        AGENT_PRESETS+=(aider); shift ;;
         --pi)           AGENT_PRESETS+=(pi); shift ;;
+        --hermes)       AGENT_PRESETS+=(hermes); shift ;;
         --agent)        AGENT_PRESETS+=("$2"); shift 2 ;;
         --no-auto-agent) AUTO_AGENT=0; shift ;;
+        --pwd-ro)       PWD_RO=1; shift ;;
         --)             shift; break ;;
         -h|--help)
           cat <<'USAGE'
@@ -60,8 +64,15 @@ pkgs.writeShellApplication {
       --codex           allow ~/.codex (OpenAI Codex CLI state)
       --aider           allow ~/.aider.conf.yml + ~/.aider/ (aider state)
       --pi              allow ~/.pi/ (Pi coding agent state, github:badlogic/pi-mono)
+      --hermes          allow ~/.hermes/ (Hermes Agent state, github:NousResearch/hermes-agent).
+                        INTENTIONALLY excludes ~/.config/gh + GH_TOKEN — Hermes is
+                        a self-improving agent with persistent memory; giving it
+                        push/PR capability is out of scope. To layer agents that
+                        need GH (e.g. claude-code), pass them as separate runs.
       --agent NAME      same as --<NAME> for an arbitrary registered preset
       --no-auto-agent   suppress auto-detection of the agent from the command name
+      --pwd-ro          bind $PWD read-only instead of read-write (general primitive;
+                        deployment wrappers compose this with their own policy)
       -h, --help        this text
 
     Profiles (this OS — Linux/bwrap):
@@ -90,6 +101,7 @@ pkgs.writeShellApplication {
         codex)               AGENT_PRESETS+=(codex) ;;
         aider)               AGENT_PRESETS+=(aider) ;;
         pi)                  AGENT_PRESETS+=(pi) ;;
+        hermes)              AGENT_PRESETS+=(hermes) ;;
       esac
     fi
 
@@ -115,8 +127,17 @@ pkgs.writeShellApplication {
         pi)
           EXTRA_ALLOW+=("$HOME/.pi")
           ;;
+        hermes)
+          # ~/.hermes holds the SQLite session DB, MEMORY.md, skills,
+          # and the bundled-uv/python/node runtime the installer dropped
+          # in. The single dir is the whole footprint.
+          # No GH state bound — git push / PR-open is intentionally
+          # out of reach for this agent (operator runs claude-code for
+          # that). See preset table in --help for why.
+          EXTRA_ALLOW+=("$HOME/.hermes")
+          ;;
         *)
-          echo "pagu-box: unknown agent preset '$preset' — try claude|opencode|codex|aider" >&2
+          echo "pagu-box: unknown agent preset '$preset' — try claude|opencode|codex|aider|pi|hermes" >&2
           exit 64
           ;;
       esac
@@ -205,7 +226,15 @@ pkgs.writeShellApplication {
     fi
 
     # Working directory always available (mounted AFTER tmpfs HOME so it wins).
-    args+=( --bind "$PWD" "$PWD" --chdir "$PWD" )
+    # --pwd-ro is the policy primitive: pagu-box itself doesn't know which
+    # trees are "sensitive"; that's the deployment wrapper's call (e.g. a
+    # homelab-aware `box` wrapper that sets --pwd-ro when $PWD lives under
+    # the operator's config repo).
+    if [ "$PWD_RO" -eq 1 ]; then
+      args+=( --ro-bind "$PWD" "$PWD" --chdir "$PWD" )
+    else
+      args+=( --bind "$PWD" "$PWD" --chdir "$PWD" )
+    fi
 
     # Hide secrets (profile + --deny).
     for d in "''${HIDE_DIRS[@]}" "''${EXTRA_DENY[@]}"; do
