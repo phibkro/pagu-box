@@ -21,6 +21,8 @@ pkgs.writeShellApplication {
     EXTRA_DENY=()
     PASS_ENV_USER=()
     NO_NET=0
+    AGENT_PRESETS=()      # --claude, --opencode, --codex, --aider etc.
+    AUTO_AGENT=1          # set 0 with --no-auto-agent to suppress command-name inference
 
     while [ $# -gt 0 ]; do
       case "$1" in
@@ -31,31 +33,88 @@ pkgs.writeShellApplication {
         --deny)         EXTRA_DENY+=("$2"); shift 2 ;;
         --env)          PASS_ENV_USER+=("''${2%%=*}"); shift 2 ;;
         --no-net)       NO_NET=1; shift ;;
+        # Agent presets — add the state binds the named agent CLI needs
+        # to function. Repeatable. Stackable with the auto-inference
+        # below (sandbox a multi-agent pipeline by passing more than one).
+        --claude)       AGENT_PRESETS+=(claude); shift ;;
+        --opencode)     AGENT_PRESETS+=(opencode); shift ;;
+        --codex)        AGENT_PRESETS+=(codex); shift ;;
+        --aider)        AGENT_PRESETS+=(aider); shift ;;
+        --agent)        AGENT_PRESETS+=("$2"); shift 2 ;;
+        --no-auto-agent) AUTO_AGENT=0; shift ;;
         --)             shift; break ;;
         -h|--help)
           cat <<'USAGE'
     pagu-box [OPTIONS] -- COMMAND [ARGS...]
     pagu-box [OPTIONS] COMMAND [ARGS...]
 
-      --profile=NAME  default | strict | paranoid | loose  (default: default)
-      --allow PATH    extra read-write bind mount (repeatable)
-      --ro-allow PATH extra read-only bind mount (repeatable)
-      --deny PATH     extra deny — tmpfs over dir or /dev/null over file (repeatable)
-      --env VAR       forward env var through the scrub (repeatable)
-      --no-net        drop network access
-      -h, --help      this text
+      --profile=NAME    default | strict | paranoid | loose  (default: default)
+      --allow PATH      extra read-write bind mount (repeatable)
+      --ro-allow PATH   extra read-only bind mount (repeatable)
+      --deny PATH       extra deny — tmpfs over dir or /dev/null over file (repeatable)
+      --env VAR         forward env var through the scrub (repeatable)
+      --no-net          drop network access
+      --claude          allow ~/.claude + ~/.claude.json (Claude Code state)
+      --opencode        allow ~/.config/opencode + ~/.local/share/opencode + ~/.cache/opencode
+      --codex           allow ~/.codex (OpenAI Codex CLI state)
+      --aider           allow ~/.aider.conf.yml + ~/.aider/ (aider state)
+      --agent NAME      same as --<NAME> for an arbitrary registered preset
+      --no-auto-agent   suppress auto-detection of the agent from the command name
+      -h, --help        this text
 
     Profiles (this OS — Linux/bwrap):
       default     $HOME bound RW; secrets denied;        net allowed
-      strict      $HOME tmpfs; only $PWD + ~/.claude RW; net allowed
-      paranoid    $HOME tmpfs; only $PWD RW;             net DENIED
+      strict      $HOME tmpfs; only $PWD bound;          net allowed
+      paranoid    $HOME tmpfs; only $PWD bound;          net DENIED
       loose       $HOME bound RW; only ~/.ssh, ~/.gnupg denied; net allowed
+
+    Agent state binds are NOT part of the profile any more. Pass --<agent>
+    (or rely on auto-detection from the command name) to opt in.
     USAGE
           exit 0 ;;
         *)              break ;;
       esac
     done
     [ $# -eq 0 ] && { echo "pagu-box: no command given" >&2; exit 64; }
+
+    # Auto-infer agent from command name unless suppressed. Matches the
+    # command being executed (first non-flag arg after `--`), not arbitrary
+    # paths — so `pagu-box claude` infers --claude but `pagu-box vim` does not.
+    if [ "$AUTO_AGENT" -eq 1 ]; then
+      cmd_basename="$(basename "''${1:-}")"
+      case "$cmd_basename" in
+        claude|claude-code)  AGENT_PRESETS+=(claude) ;;
+        opencode)            AGENT_PRESETS+=(opencode) ;;
+        codex)               AGENT_PRESETS+=(codex) ;;
+        aider)               AGENT_PRESETS+=(aider) ;;
+      esac
+    fi
+
+    # Expand each preset into the right --allow/--ro-allow set.
+    for preset in "''${AGENT_PRESETS[@]}"; do
+      case "$preset" in
+        claude)
+          EXTRA_ALLOW+=("$HOME/.claude" "$HOME/.claude.json")
+          ;;
+        opencode)
+          EXTRA_ALLOW+=(
+            "$HOME/.config/opencode"
+            "$HOME/.local/share/opencode"
+            "$HOME/.cache/opencode"
+          )
+          ;;
+        codex)
+          EXTRA_ALLOW+=("$HOME/.codex")
+          ;;
+        aider)
+          EXTRA_ALLOW+=("$HOME/.aider.conf.yml" "$HOME/.aider")
+          ;;
+        *)
+          echo "pagu-box: unknown agent preset '$preset' — try claude|opencode|codex|aider" >&2
+          exit 64
+          ;;
+      esac
+    done
 
     # ---- profile selection ----
     case "$PROFILE" in
@@ -77,10 +136,9 @@ pkgs.writeShellApplication {
         ;;
       strict)
         BIND_HOME=0
-        # ~/.claude (state dir) + ~/.claude.json (config file) — both required
-        # by Claude Code. opencode and similar use ~/.config/<tool>/ which is
-        # not bound by strict; the user must add --allow for those.
-        EXTRA_ALLOW+=("$HOME/.claude" "$HOME/.claude.json")
+        # No agent state binds by default — pass --<agent> (or let the
+        # auto-detector match the command name) to opt in. This used to
+        # hardcode ~/.claude{,.json} which was wrong for non-Claude runs.
         HIDE_DIRS=()
         HIDE_FILES=()
         SHARE_NET=1
