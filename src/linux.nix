@@ -40,6 +40,7 @@ pkgs.writeShellApplication {
         --opencode)     AGENT_PRESETS+=(opencode); shift ;;
         --codex)        AGENT_PRESETS+=(codex); shift ;;
         --aider)        AGENT_PRESETS+=(aider); shift ;;
+        --pi)           AGENT_PRESETS+=(pi); shift ;;
         --agent)        AGENT_PRESETS+=("$2"); shift 2 ;;
         --no-auto-agent) AUTO_AGENT=0; shift ;;
         --)             shift; break ;;
@@ -58,6 +59,7 @@ pkgs.writeShellApplication {
       --opencode        allow ~/.config/opencode + ~/.local/share/opencode + ~/.cache/opencode
       --codex           allow ~/.codex (OpenAI Codex CLI state)
       --aider           allow ~/.aider.conf.yml + ~/.aider/ (aider state)
+      --pi              allow ~/.pi/ (Pi coding agent state, github:badlogic/pi-mono)
       --agent NAME      same as --<NAME> for an arbitrary registered preset
       --no-auto-agent   suppress auto-detection of the agent from the command name
       -h, --help        this text
@@ -87,6 +89,7 @@ pkgs.writeShellApplication {
         opencode)            AGENT_PRESETS+=(opencode) ;;
         codex)               AGENT_PRESETS+=(codex) ;;
         aider)               AGENT_PRESETS+=(aider) ;;
+        pi)                  AGENT_PRESETS+=(pi) ;;
       esac
     fi
 
@@ -108,6 +111,9 @@ pkgs.writeShellApplication {
           ;;
         aider)
           EXTRA_ALLOW+=("$HOME/.aider.conf.yml" "$HOME/.aider")
+          ;;
+        pi)
+          EXTRA_ALLOW+=("$HOME/.pi")
           ;;
         *)
           echo "pagu-box: unknown agent preset '$preset' — try claude|opencode|codex|aider" >&2
