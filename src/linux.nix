@@ -25,6 +25,7 @@ pkgs.writeShellApplication {
     AUTO_AGENT=1          # set 0 with --no-auto-agent to suppress command-name inference
     PWD_RO=0              # downgrade $PWD bind from RW to RO; per-deployment wrappers
                           # use this to keep a tree read-only without rewriting the bind set
+    NEEDS_JOURNAL=0       # opt in to read-only journalctl access (journal dirs + machine-id)
 
     while [ $# -gt 0 ]; do
       case "$1" in
@@ -47,6 +48,7 @@ pkgs.writeShellApplication {
         --agent)        AGENT_PRESETS+=("$2"); shift 2 ;;
         --no-auto-agent) AUTO_AGENT=0; shift ;;
         --pwd-ro)       PWD_RO=1; shift ;;
+        --journal)      NEEDS_JOURNAL=1; shift ;;
         --)             shift; break ;;
         -h|--help)
           cat <<'USAGE'
@@ -73,6 +75,10 @@ pkgs.writeShellApplication {
       --no-auto-agent   suppress auto-detection of the agent from the command name
       --pwd-ro          bind $PWD read-only instead of read-write (general primitive;
                         deployment wrappers compose this with their own policy)
+      --journal         read-only systemd journal access (binds /var/log/journal,
+                        /run/log/journal, /etc/machine-id). Auto-enabled when the
+                        command is `journalctl`. Off by default — least-privilege
+                        unless the agent is actually debugging the host.
       -h, --help        this text
 
     Profiles (this OS — Linux/bwrap):
@@ -102,6 +108,7 @@ pkgs.writeShellApplication {
         aider)               AGENT_PRESETS+=(aider) ;;
         pi)                  AGENT_PRESETS+=(pi) ;;
         hermes)              AGENT_PRESETS+=(hermes) ;;
+        journalctl)          NEEDS_JOURNAL=1 ;;
       esac
     fi
 
@@ -142,6 +149,17 @@ pkgs.writeShellApplication {
           ;;
       esac
     done
+
+    # journalctl needs the journal dirs AND /etc/machine-id (libsystemd looks
+    # there to pick which host's journal to read). Without machine-id the
+    # journal dirs alone produce "No journal files were found".
+    if [ "$NEEDS_JOURNAL" -eq 1 ]; then
+      EXTRA_RO_ALLOW+=(
+        /var/log/journal
+        /run/log/journal
+        /etc/machine-id
+      )
+    fi
 
     # ---- profile selection ----
     case "$PROFILE" in

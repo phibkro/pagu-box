@@ -32,6 +32,7 @@ pkgs.writeShellApplication {
         --deny)         EXTRA_DENY+=("$2"); shift 2 ;;
         --env)          PASS_ENV_USER+=("''${2%%=*}"); shift 2 ;;
         --no-net)       NO_NET=1; shift ;;
+        --journal)      shift ;;  # no-op on darwin — `log show` uses its own auth model
         --)             shift; break ;;
         -h|--help)
           cat <<'USAGE'
@@ -46,6 +47,8 @@ pkgs.writeShellApplication {
       --deny PATH     extra deny — appends a (deny) clause to the seatbelt profile
       --env VAR       forward env var through the scrub (repeatable)
       --no-net        drop network access (composes onto the chosen profile)
+      --journal       Linux-only flag accepted as a no-op on darwin
+                      (macOS uses `log show` which has its own auth model)
       -h, --help      this text
 
     Profiles (this OS — macOS/sandbox-exec):
