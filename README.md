@@ -1,4 +1,12 @@
-# pagu-box
+# pagu-box — ARCHIVED, merged into [pagu](https://github.com/phibkro/pagu)
+
+> **This repository is archived (2026-07-19).** pagu-box merged into
+> [**pagu**](https://github.com/phibkro/pagu) as its enforcement layer
+> ("box"), joined by a policy/escalation daemon ("gate") — see pagu's
+> `docs/decisions/0004-pivot-to-sandbox-plus-gate.md`. The full history of
+> this repo is preserved inside pagu (subtree merge, tree-identical at
+> import). Use pagu's flake output `pagu-box` for the compatible binary;
+> existing `flake.lock` pins on this repo keep resolving.
 
 A cross-platform command prefix that runs **any process** inside a hardened
 sandbox. The original use case is coding agents (Claude Code, opencode,
