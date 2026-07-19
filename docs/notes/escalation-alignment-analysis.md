@@ -10,6 +10,12 @@ status: analysis (2026-07-19) — precedes design + ADRs
 
 # Escalation alignment — analysis
 
+> Companion: [composition-split-analysis.md](./composition-split-analysis.md)
+> (round 2) — how pagu/pagu-box/flow/herdr overlap and conflict, and the
+> control-plane / PA / data-plane split that composes them. Read this doc for
+> the friction evidence and gap matrix; read the companion for the
+> architecture that reconciles the tools.
+
 **Map:** [The problem](#the-problem-evidence) · [pagu-box today](#pagu-box-today-structural-diagnosis)
 · [Ecosystem philosophy](#what-the-ecosystem-needs-from-pagu-box) · [Prior art](#prior-art-verified)
 · [Gap matrix](#gap-matrix) · [Design directions](#design-directions) · [Sequencing](#recommended-sequencing)
