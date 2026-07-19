@@ -6,7 +6,9 @@ summary: >
   (seL4, KeyKOS, Capsicum, macaroons, Lampson, Saltzer-Schroeder) prescribe for
   the split. Companion to escalation-alignment-analysis.md; feeds the design
   phase; decides nothing.
-status: analysis (2026-07-19) — precedes design + ADRs
+status: analysis (2026-07-19) — DECIDED same day: pagu ADR-0004 (pivot: pagu
+  = box + gate, harness archived) and ADR-0005 (grant schema + boundary) in
+  /srv/share/projects/pagu/docs/decisions/; this repo merges into pagu
 ---
 
 # Composition & the plane split — analysis
